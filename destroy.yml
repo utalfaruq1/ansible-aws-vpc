@@ -14,14 +14,14 @@
       ansible.builtin.include_vars:
         file: vars/vpc_setup
 
-    - name: Check if VPC output file exists
+    - name: Check if VPC output variables exist
       ansible.builtin.stat:
         path: vars/output_vars
       register: output_vars_file
 
 
     # =========================================================
-    # SAFETY CONFIRMATION
+    # SAFETY CHECK
     # =========================================================
 
     - name: Confirm infrastructure destruction
@@ -31,7 +31,7 @@
           WARNING: VPROFILE AWS INFRASTRUCTURE DESTRUCTION
           ==========================================================
 
-          This playbook will attempt to DELETE:
+          This playbook will DELETE the Vprofile infrastructure:
 
             - Bastion EC2 instance
             - Bastion Security Group
@@ -42,7 +42,7 @@
             - 3 Private Subnets
             - 3 Public Subnets
             - Vprofile VPC
-            - Local vars/output_vars file
+            - vars/output_vars
 
           Region: {{ region }}
           VPC:    {{ vpc_name }}
@@ -55,7 +55,7 @@
 
     - name: Cancel destruction
       ansible.builtin.fail:
-        msg: "Destruction cancelled because DESTROY was not entered."
+        msg: "Destruction cancelled. You did not type DESTROY."
       when: destroy_confirmation.user_input != "DESTROY"
 
 
@@ -63,13 +63,13 @@
     # LOAD OUTPUT VARIABLES
     # =========================================================
 
-    - name: Stop if VPC output file does not exist
+    - name: Stop if output variables do not exist
       ansible.builtin.fail:
         msg: |
           vars/output_vars does not exist.
 
-          The VPC resource IDs cannot be determined safely.
-          Refusing to continue with destruction.
+          The VPC resource IDs cannot be safely determined.
+          Destruction has been stopped.
       when: not output_vars_file.stat.exists
 
     - name: Import VPC output variables
@@ -78,10 +78,10 @@
 
 
     # =========================================================
-    # DISPLAY RESOURCES THAT WILL BE DELETED
+    # DISPLAY RESOURCES
     # =========================================================
 
-    - name: Display resources to be destroyed
+    - name: Display resources that will be destroyed
       ansible.builtin.debug:
         msg:
           - "VPC ID: {{ vpcid }}"
@@ -108,10 +108,51 @@
         state: absent
         wait: true
         wait_timeout: 300
+      register: bastion_termination
 
-    - name: Display Bastion termination status
+    - name: Display Bastion termination result
       ansible.builtin.debug:
-        msg: "Bastion Host has been terminated."
+        msg: "Bastion Host termination completed."
+
+
+    # =========================================================
+    # FIND BASTION SECURITY GROUP
+    # =========================================================
+
+    - name: Find Bastion Security Group
+      amazon.aws.ec2_security_group_info:
+        region: "{{ region }}"
+        filters:
+          group-name: Bastion-host-sg
+          vpc-id: "{{ vpcid }}"
+      register: bastion_sg_info
+
+
+    # =========================================================
+    # CHECK WHETHER SECURITY GROUP EXISTS
+    # =========================================================
+
+    - name: Display Bastion Security Group
+      ansible.builtin.debug:
+        msg:
+          - "Bastion Security Group ID: {{ bastion_sg_info.security_groups[0].group_id }}"
+      when: bastion_sg_info.security_groups | length > 0
+
+
+    # =========================================================
+    # WAIT FOR BASTION ENIs TO DISAPPEAR
+    # =========================================================
+
+    - name: Wait for Bastion ENIs to be released
+      amazon.aws.ec2_network_interface_info:
+        region: "{{ region }}"
+        filters:
+          group-id: "{{ bastion_sg_info.security_groups[0].group_id }}"
+      register: bastion_eni_info
+      until: bastion_eni_info.network_interfaces | length == 0
+      retries: 30
+      delay: 10
+      when: bastion_sg_info.security_groups | length > 0
 
 
     # =========================================================
@@ -124,8 +165,9 @@
         region: "{{ region }}"
         vpc_id: "{{ vpcid }}"
         state: absent
+      when: bastion_sg_info.security_groups | length > 0
 
-    - name: Display security group deletion status
+    - name: Display Security Group deletion result
       ansible.builtin.debug:
         msg: "Bastion Security Group has been deleted."
 
@@ -141,8 +183,9 @@
         state: absent
         wait: true
         wait_timeout: 300
+      register: natgw_delete
 
-    - name: Display NAT Gateway deletion status
+    - name: Display NAT Gateway deletion result
       ansible.builtin.debug:
         msg: "NAT Gateway deletion completed."
 
@@ -157,10 +200,6 @@
         region: "{{ region }}"
         state: absent
 
-    - name: Display Private Route Table deletion status
-      ansible.builtin.debug:
-        msg: "Private Route Table has been deleted."
-
 
     # =========================================================
     # DELETE PUBLIC ROUTE TABLE
@@ -172,10 +211,6 @@
         region: "{{ region }}"
         state: absent
 
-    - name: Display Public Route Table deletion status
-      ansible.builtin.debug:
-        msg: "Public Route Table has been deleted."
-
 
     # =========================================================
     # DELETE INTERNET GATEWAY
@@ -186,10 +221,7 @@
         vpc_id: "{{ vpcid }}"
         region: "{{ region }}"
         state: absent
-
-    - name: Display Internet Gateway deletion status
-      ansible.builtin.debug:
-        msg: "Internet Gateway has been deleted."
+      register: igw_delete
 
 
     # =========================================================
@@ -267,14 +299,15 @@
         name: "{{ vpc_name }}"
         region: "{{ region }}"
         state: absent
+      register: vpc_delete
 
-    - name: Display VPC deletion status
+    - name: Display VPC deletion result
       ansible.builtin.debug:
         msg: "Vprofile VPC has been deleted."
 
 
     # =========================================================
-    # REMOVE LOCAL OUTPUT FILE
+    # DELETE LOCAL OUTPUT VARIABLES
     # =========================================================
 
     - name: Remove VPC output variables
@@ -291,8 +324,9 @@
       ansible.builtin.debug:
         msg:
           - "=========================================================="
-          - "VPROFILE AWS INFRASTRUCTURE DESTRUCTION COMPLETED"
+          - "VPROFILE AWS INFRASTRUCTURE DESTROYED"
           - "=========================================================="
-          - "VPC and associated resources have been removed."
+          - "VPC: {{ vpc_name }}"
           - "Region: {{ region }}"
+          - "All configured Vprofile resources have been removed."
           - "=========================================================="
