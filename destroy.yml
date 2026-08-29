@@ -1,4 +1,3 @@
-```yaml
 ---
 - name: Destroy Vprofile AWS Infrastructure
   hosts: localhost
