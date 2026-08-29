@@ -1,512 +1,192 @@
 ---
-- name: Destroy Vprofile AWS Infrastructure
+- name: Destroy Vprofile Infrastructure
   hosts: localhost
   connection: local
   gather_facts: false
 
   tasks:
 
-    # =========================================================
-    # 1. LOAD VARIABLES
-    # =========================================================
+    # ---------------------------------------------------------
+    # VARIABLES
+    # ---------------------------------------------------------
 
-    - name: Import VPC variables
+    - name: Import VPC setup variables
       ansible.builtin.include_vars:
         file: vars/vpc_setup
-
-    - name: Check if output variables exist
-      ansible.builtin.stat:
-        path: vars/output_vars
-      register: output_vars_file
-
-
-    # =========================================================
-    # 2. SAFETY CONFIRMATION
-    # =========================================================
-
-    - name: Confirm infrastructure destruction
-      ansible.builtin.pause:
-        prompt: |
-          ==========================================================
-          WARNING: VPROFILE AWS INFRASTRUCTURE DESTRUCTION
-          ==========================================================
-
-          THIS WILL DELETE THE VPROFILE INFRASTRUCTURE.
-
-          Resources:
-
-            - Bastion EC2 instance
-            - Bastion Security Group
-            - Bastion ENIs if required
-            - NAT Gateway
-            - Private Route Table
-            - Public Route Table
-            - Internet Gateway
-            - 3 Private Subnets
-            - 3 Public Subnets
-            - Vprofile VPC
-            - vars/output_vars
-
-          Region: {{ region }}
-          VPC:    {{ vpc_name }}
-
-          THIS ACTION CANNOT BE EASILY UNDONE.
-
-          Type DESTROY to continue.
-          ==========================================================
-      register: destroy_confirmation
-
-    - name: Cancel destruction
-      ansible.builtin.fail:
-        msg: "Destruction cancelled. You did not type DESTROY."
-      when: destroy_confirmation.user_input != "DESTROY"
-
-
-    # =========================================================
-    # 3. MAKE SURE OUTPUT VARIABLES EXIST
-    # =========================================================
-
-    - name: Stop if output variables do not exist
-      ansible.builtin.fail:
-        msg: |
-          vars/output_vars does not exist.
-
-          The resource IDs required for safe destruction
-          cannot be determined.
-
-          Destruction has been stopped.
-      when: not output_vars_file.stat.exists
-
-
-    # =========================================================
-    # 4. IMPORT RESOURCE IDS
-    # =========================================================
 
     - name: Import VPC output variables
       ansible.builtin.include_vars:
         file: vars/output_vars
 
 
-    # =========================================================
-    # 5. DISPLAY RESOURCES
-    # =========================================================
-
-    - name: Display resources to be destroyed
-      ansible.builtin.debug:
-        msg:
-          - "=========================================================="
-          - "VPROFILE RESOURCES TO BE DESTROYED"
-          - "=========================================================="
-          - "VPC:               {{ vpcid }}"
-          - "Public Subnet 1:   {{ pubsub1id }}"
-          - "Public Subnet 2:   {{ pubsub2id }}"
-          - "Public Subnet 3:   {{ pubsub3id }}"
-          - "Private Subnet 1:  {{ privsub1id }}"
-          - "Private Subnet 2:  {{ privsub2id }}"
-          - "Private Subnet 3:  {{ privsub3id }}"
-          - "Internet Gateway:  {{ igwid }}"
-          - "Public Route Table: {{ pubRTid }}"
-          - "NAT Gateway:       {{ NATGWid }}"
-          - "Private Route Table: {{ privRTid }}"
-          - "=========================================================="
-
-
-    # =========================================================
-    # 6. CHECK AWS CLI
-    # =========================================================
-
-    - name: Check AWS CLI availability
-      ansible.builtin.command:
-        cmd: aws --version
-      register: aws_cli_check
-      changed_when: false
-
-    - name: Display AWS CLI version
-      ansible.builtin.debug:
-        var: aws_cli_check.stdout
-
-
-    # =========================================================
-    # 7. CHECK AWS CREDENTIALS
-    # =========================================================
-
-    - name: Verify AWS credentials
-      ansible.builtin.command:
-        cmd: aws sts get-caller-identity
-      register: aws_identity
-      changed_when: false
-
-    - name: Display AWS identity
-      ansible.builtin.debug:
-        msg: "AWS authentication successful."
-
-
-    # =========================================================
-    # 8. TERMINATE BASTION
-    # =========================================================
+    # ---------------------------------------------------------
+    # TERMINATE BASTION HOST
+    # ---------------------------------------------------------
 
     - name: Terminate Bastion Host
       amazon.aws.ec2_instance:
-        name: Bastion_host
         region: "{{ region }}"
         state: absent
+        filters:
+          "tag:Name": Bastion_host
+          "tag:Project": Vprofile
+          "instance-state-name":
+            - pending
+            - running
+            - stopping
+            - stopped
         wait: true
         wait_timeout: 300
-      register: bastion_result
-
-    - name: Display Bastion termination status
-      ansible.builtin.debug:
-        msg: "Bastion Host termination request completed."
 
 
-    # =========================================================
-    # 9. FIND BASTION SECURITY GROUP
-    # =========================================================
+    # ---------------------------------------------------------
+    # DELETE BASTION SECURITY GROUP
+    # ---------------------------------------------------------
 
-    - name: Find Bastion Security Group
-      amazon.aws.ec2_security_group_info:
-        region: "{{ region }}"
-        filters:
-          group-name: Bastion-host-sg
-          vpc-id: "{{ vpcid }}"
-      register: bastion_sg_info
-
-    - name: Set Bastion Security Group ID
-      ansible.builtin.set_fact:
-        bastion_sg_id: "{{ bastion_sg_info.security_groups[0].group_id }}"
-      when: bastion_sg_info.security_groups | length > 0
-
-    - name: Display Bastion Security Group ID
-      ansible.builtin.debug:
-        msg: "Bastion Security Group: {{ bastion_sg_id }}"
-      when: bastion_sg_info.security_groups | length > 0
-
-
-    # =========================================================
-    # 10. FIND ENIs USING BASTION SECURITY GROUP
-    # =========================================================
-
-    - name: Find ENIs using Bastion Security Group
-      ansible.builtin.shell: |
-        aws ec2 describe-network-interfaces \
-          --region "{{ region }}" \
-          --filters "Name=group-id,Values={{ bastion_sg_id }}" \
-          --query 'NetworkInterfaces[].{ID:NetworkInterfaceId,Status:Status,Instance:Attachment.InstanceId}' \
-          --output json
-      register: bastion_eni_info
-      changed_when: false
-      when: bastion_sg_info.security_groups | length > 0
-
-
-    # =========================================================
-    # 11. DISPLAY ENIs
-    # =========================================================
-
-    - name: Display Bastion ENIs
-      ansible.builtin.debug:
-        msg: "{{ bastion_eni_info.stdout }}"
-      when: bastion_sg_info.security_groups | length > 0
-
-
-    # =========================================================
-    # 12. WAIT FOR ENIs TO BECOME AVAILABLE
-    #
-    # After EC2 termination AWS may need time to detach
-    # the network interface from the instance.
-    # =========================================================
-
-    - name: Wait for Bastion ENIs to become available
-      ansible.builtin.shell: |
-        aws ec2 describe-network-interfaces \
-          --region "{{ region }}" \
-          --filters "Name=group-id,Values={{ bastion_sg_id }}" \
-          --query 'NetworkInterfaces[?Status==`in-use`].NetworkInterfaceId' \
-          --output text
-      register: bastion_inuse_eni
-      until: bastion_inuse_eni.stdout | trim == ""
-      retries: 36
-      delay: 10
-      changed_when: false
-      when: bastion_sg_info.security_groups | length > 0
-
-
-    # =========================================================
-    # 13. FIND AVAILABLE ENIs
-    # =========================================================
-
-    - name: Find available Bastion ENIs
-      ansible.builtin.shell: |
-        aws ec2 describe-network-interfaces \
-          --region "{{ region }}" \
-          --filters "Name=group-id,Values={{ bastion_sg_id }}" \
-                    "Name=status,Values=available" \
-          --query 'NetworkInterfaces[].NetworkInterfaceId' \
-          --output text
-      register: available_bastion_enis
-      changed_when: false
-      when: bastion_sg_info.security_groups | length > 0
-
-
-    # =========================================================
-    # 14. DELETE AVAILABLE ENIs
-    # =========================================================
-
-    - name: Delete available Bastion ENIs
-      ansible.builtin.shell: |
-        for eni in {{ available_bastion_enis.stdout.split() | join(' ') }}; do
-          aws ec2 delete-network-interface \
-            --region "{{ region }}" \
-            --network-interface-id "$eni"
-        done
-      when:
-        - bastion_sg_info.security_groups | length > 0
-        - available_bastion_enis.stdout | trim != ""
-      changed_when: true
-
-
-    # =========================================================
-    # 15. WAIT FOR SECURITY GROUP ENIs TO DISAPPEAR
-    # =========================================================
-
-    - name: Wait for Bastion ENIs to disappear
-      ansible.builtin.shell: |
-        aws ec2 describe-network-interfaces \
-          --region "{{ region }}" \
-          --filters "Name=group-id,Values={{ bastion_sg_id }}" \
-          --query 'NetworkInterfaces[].NetworkInterfaceId' \
-          --output text
-      register: remaining_bastion_enis
-      until: remaining_bastion_enis.stdout | trim == ""
-      retries: 36
-      delay: 10
-      changed_when: false
-      when: bastion_sg_info.security_groups | length > 0
-
-
-    # =========================================================
-    # 16. DELETE BASTION SECURITY GROUP
-    # =========================================================
-
-    - name: Delete Bastion Security Group
+    - name: Delete Bastion security group
       amazon.aws.ec2_security_group:
         name: Bastion-host-sg
-        region: "{{ region }}"
         vpc_id: "{{ vpcid }}"
+        region: "{{ region }}"
         state: absent
-      register: bastion_sg_delete
-      when: bastion_sg_info.security_groups | length > 0
-
-    - name: Display Bastion Security Group status
-      ansible.builtin.debug:
-        msg: "Bastion Security Group deleted."
-      when: bastion_sg_info.security_groups | length > 0
 
 
-    # =========================================================
-    # 17. DELETE NAT GATEWAY
-    # =========================================================
+    # ---------------------------------------------------------
+    # DELETE SSH KEY PAIR
+    # ---------------------------------------------------------
+
+    - name: Delete Vprofile EC2 key pair
+      amazon.aws.ec2_key:
+        name: vprofile-key
+        region: "{{ region }}"
+        state: absent
+
+    - name: Remove local bastion-key.pem file
+      ansible.builtin.file:
+        path: "./bastion-key.pem"
+        state: absent
+
+
+    # ---------------------------------------------------------
+    # DELETE NAT GATEWAY
+    # ---------------------------------------------------------
 
     - name: Delete NAT Gateway
       amazon.aws.ec2_vpc_nat_gateway:
         nat_gateway_id: "{{ NATGWid }}"
         region: "{{ region }}"
         state: absent
+        release_eip: true
         wait: true
-        wait_timeout: 600
-      register: nat_gateway_delete
-
-    - name: Display NAT Gateway deletion status
-      ansible.builtin.debug:
-        msg: "NAT Gateway deletion request completed."
+        wait_timeout: 300
 
 
-    # =========================================================
-    # 18. WAIT UNTIL NAT GATEWAY IS COMPLETELY GONE
-    # =========================================================
-
-    - name: Wait for NAT Gateway to disappear
-      ansible.builtin.shell: |
-        aws ec2 describe-nat-gateways \
-          --region "{{ region }}" \
-          --nat-gateway-ids "{{ NATGWid }}" \
-          --query 'NatGateways[0].State' \
-          --output text
-      register: nat_status
-      until: >
-        nat_status.rc != 0 or
-        nat_status.stdout | trim == "deleted"
-      retries: 60
-      delay: 10
-      changed_when: false
-
-
-    # =========================================================
-    # 19. DELETE PRIVATE ROUTE TABLE
-    # =========================================================
+    # ---------------------------------------------------------
+    # DELETE PRIVATE ROUTE TABLE
+    # ---------------------------------------------------------
 
     - name: Delete Private Route Table
       amazon.aws.ec2_vpc_route_table:
-        route_table_id: "{{ privRTid }}"
+        vpc_id: "{{ vpcid }}"
         region: "{{ region }}"
+        route_table_id: "{{ privRTid }}"
+        lookup: id
         state: absent
 
 
-    # =========================================================
-    # 20. DELETE PUBLIC ROUTE TABLE
-    # =========================================================
+    # ---------------------------------------------------------
+    # DELETE PUBLIC ROUTE TABLE
+    # ---------------------------------------------------------
 
     - name: Delete Public Route Table
       amazon.aws.ec2_vpc_route_table:
-        route_table_id: "{{ pubRTid }}"
+        vpc_id: "{{ vpcid }}"
         region: "{{ region }}"
+        route_table_id: "{{ pubRTid }}"
+        lookup: id
         state: absent
 
 
-    # =========================================================
-    # 21. DELETE INTERNET GATEWAY
-    # =========================================================
+    # ---------------------------------------------------------
+    # DELETE INTERNET GATEWAY
+    # ---------------------------------------------------------
 
     - name: Delete Internet Gateway
       amazon.aws.ec2_vpc_igw:
         vpc_id: "{{ vpcid }}"
         region: "{{ region }}"
         state: absent
-      register: igw_result
-
-    - name: Display Internet Gateway status
-      ansible.builtin.debug:
-        msg: "Internet Gateway deleted."
 
 
-    # =========================================================
-    # 22. DELETE PRIVATE SUBNET 1
-    # =========================================================
+    # ---------------------------------------------------------
+    # DELETE PRIVATE SUBNETS
+    # ---------------------------------------------------------
 
     - name: Delete Private Subnet 1
       amazon.aws.ec2_vpc_subnet:
-        subnet_id: "{{ privsub1id }}"
+        vpc_id: "{{ vpcid }}"
         region: "{{ region }}"
+        cidr: "{{ PrivSub1Cidr }}"
         state: absent
-
-
-    # =========================================================
-    # 23. DELETE PRIVATE SUBNET 2
-    # =========================================================
 
     - name: Delete Private Subnet 2
       amazon.aws.ec2_vpc_subnet:
-        subnet_id: "{{ privsub2id }}"
+        vpc_id: "{{ vpcid }}"
         region: "{{ region }}"
+        cidr: "{{ PrivSub2Cidr }}"
         state: absent
-
-
-    # =========================================================
-    # 24. DELETE PRIVATE SUBNET 3
-    # =========================================================
 
     - name: Delete Private Subnet 3
       amazon.aws.ec2_vpc_subnet:
-        subnet_id: "{{ privsub3id }}"
+        vpc_id: "{{ vpcid }}"
         region: "{{ region }}"
+        cidr: "{{ PrivSub3Cidr }}"
         state: absent
 
 
-    # =========================================================
-    # 25. DELETE PUBLIC SUBNET 1
-    # =========================================================
+    # ---------------------------------------------------------
+    # DELETE PUBLIC SUBNETS
+    # ---------------------------------------------------------
 
     - name: Delete Public Subnet 1
       amazon.aws.ec2_vpc_subnet:
-        subnet_id: "{{ pubsub1id }}"
+        vpc_id: "{{ vpcid }}"
         region: "{{ region }}"
+        cidr: "{{ PubSub1Cidr }}"
         state: absent
-
-
-    # =========================================================
-    # 26. DELETE PUBLIC SUBNET 2
-    # =========================================================
 
     - name: Delete Public Subnet 2
       amazon.aws.ec2_vpc_subnet:
-        subnet_id: "{{ pubsub2id }}"
+        vpc_id: "{{ vpcid }}"
         region: "{{ region }}"
+        cidr: "{{ PubSub2Cidr }}"
         state: absent
-
-
-    # =========================================================
-    # 27. DELETE PUBLIC SUBNET 3
-    # =========================================================
 
     - name: Delete Public Subnet 3
       amazon.aws.ec2_vpc_subnet:
-        subnet_id: "{{ pubsub3id }}"
+        vpc_id: "{{ vpcid }}"
         region: "{{ region }}"
+        cidr: "{{ PubSub3Cidr }}"
         state: absent
 
 
-    # =========================================================
-    # 28. WAIT FOR SUBNETS TO DISAPPEAR
-    # =========================================================
-
-    - name: Wait for Vprofile subnets to disappear
-      ansible.builtin.shell: |
-        aws ec2 describe-subnets \
-          --region "{{ region }}" \
-          --filters "Name=vpc-id,Values={{ vpcid }}" \
-          --query 'Subnets[].SubnetId' \
-          --output text
-      register: remaining_subnets
-      until: remaining_subnets.stdout | trim == ""
-      retries: 30
-      delay: 5
-      changed_when: false
-
-
-    # =========================================================
-    # 29. DELETE VPC
-    # =========================================================
+    # ---------------------------------------------------------
+    # DELETE VPC
+    # ---------------------------------------------------------
 
     - name: Delete Vprofile VPC
       amazon.aws.ec2_vpc_net:
         name: "{{ vpc_name }}"
+        cidr_block: "{{ vpcCidr }}"
         region: "{{ region }}"
         state: absent
-      register: vpc_delete
-
-    - name: Display VPC deletion status
-      ansible.builtin.debug:
-        msg: "Vprofile VPC deleted."
 
 
-    # =========================================================
-    # 30. REMOVE OUTPUT VARIABLES
-    # =========================================================
+    # ---------------------------------------------------------
+    # REMOVE OUTPUT VARS FILE
+    # ---------------------------------------------------------
 
-    - name: Remove VPC output variables
+    - name: Remove vars/output_vars file
       ansible.builtin.file:
         path: vars/output_vars
         state: absent
-
-
-    # =========================================================
-    # 31. FINAL MESSAGE
-    # =========================================================
-
-    - name: Display destruction completion
-      ansible.builtin.debug:
-        msg:
-          - "=========================================================="
-          - "VPROFILE AWS INFRASTRUCTURE DESTROYED SUCCESSFULLY"
-          - "=========================================================="
-          - "VPC: {{ vpc_name }}"
-          - "Region: {{ region }}"
-          - "Bastion: Terminated"
-          - "Bastion Security Group: Deleted"
-          - "NAT Gateway: Deleted"
-          - "Route Tables: Deleted"
-          - "Internet Gateway: Deleted"
-          - "Subnets: Deleted"
-          - "VPC: Deleted"
-          - "vars/output_vars: Removed"
-          - "=========================================================="
-
