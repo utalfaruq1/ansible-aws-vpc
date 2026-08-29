@@ -6,22 +6,100 @@
 
   tasks:
 
-    # ---------------------------------------------------------
+    # =========================================================
     # LOAD VARIABLES
-    # ---------------------------------------------------------
+    # =========================================================
 
     - name: Import VPC variables
       ansible.builtin.include_vars:
         file: vars/vpc_setup
+
+    - name: Check if VPC output file exists
+      ansible.builtin.stat:
+        path: vars/output_vars
+      register: output_vars_file
+
+
+    # =========================================================
+    # SAFETY CONFIRMATION
+    # =========================================================
+
+    - name: Confirm infrastructure destruction
+      ansible.builtin.pause:
+        prompt: |
+          ==========================================================
+          WARNING: VPROFILE AWS INFRASTRUCTURE DESTRUCTION
+          ==========================================================
+
+          This playbook will attempt to DELETE:
+
+            - Bastion EC2 instance
+            - Bastion Security Group
+            - NAT Gateway
+            - Private Route Table
+            - Public Route Table
+            - Internet Gateway
+            - 3 Private Subnets
+            - 3 Public Subnets
+            - Vprofile VPC
+            - Local vars/output_vars file
+
+          Region: {{ region }}
+          VPC:    {{ vpc_name }}
+
+          This action cannot be easily undone.
+
+          Type DESTROY to continue.
+          ==========================================================
+      register: destroy_confirmation
+
+    - name: Cancel destruction
+      ansible.builtin.fail:
+        msg: "Destruction cancelled because DESTROY was not entered."
+      when: destroy_confirmation.user_input != "DESTROY"
+
+
+    # =========================================================
+    # LOAD OUTPUT VARIABLES
+    # =========================================================
+
+    - name: Stop if VPC output file does not exist
+      ansible.builtin.fail:
+        msg: |
+          vars/output_vars does not exist.
+
+          The VPC resource IDs cannot be determined safely.
+          Refusing to continue with destruction.
+      when: not output_vars_file.stat.exists
 
     - name: Import VPC output variables
       ansible.builtin.include_vars:
         file: vars/output_vars
 
 
-    # ---------------------------------------------------------
-    # TERMINATE BASTION
-    # ---------------------------------------------------------
+    # =========================================================
+    # DISPLAY RESOURCES THAT WILL BE DELETED
+    # =========================================================
+
+    - name: Display resources to be destroyed
+      ansible.builtin.debug:
+        msg:
+          - "VPC ID: {{ vpcid }}"
+          - "Public Subnet 1: {{ pubsub1id }}"
+          - "Public Subnet 2: {{ pubsub2id }}"
+          - "Public Subnet 3: {{ pubsub3id }}"
+          - "Private Subnet 1: {{ privsub1id }}"
+          - "Private Subnet 2: {{ privsub2id }}"
+          - "Private Subnet 3: {{ privsub3id }}"
+          - "Internet Gateway: {{ igwid }}"
+          - "Public Route Table: {{ pubRTid }}"
+          - "NAT Gateway: {{ NATGWid }}"
+          - "Private Route Table: {{ privRTid }}"
+
+
+    # =========================================================
+    # TERMINATE BASTION HOST
+    # =========================================================
 
     - name: Terminate Bastion Host
       amazon.aws.ec2_instance:
@@ -29,10 +107,16 @@
         region: "{{ region }}"
         state: absent
         wait: true
+        wait_timeout: 300
 
-    # ---------------------------------------------------------
+    - name: Display Bastion termination status
+      ansible.builtin.debug:
+        msg: "Bastion Host has been terminated."
+
+
+    # =========================================================
     # DELETE BASTION SECURITY GROUP
-    # ---------------------------------------------------------
+    # =========================================================
 
     - name: Delete Bastion Security Group
       amazon.aws.ec2_security_group:
@@ -41,10 +125,14 @@
         vpc_id: "{{ vpcid }}"
         state: absent
 
+    - name: Display security group deletion status
+      ansible.builtin.debug:
+        msg: "Bastion Security Group has been deleted."
 
-    # ---------------------------------------------------------
+
+    # =========================================================
     # DELETE NAT GATEWAY
-    # ---------------------------------------------------------
+    # =========================================================
 
     - name: Delete NAT Gateway
       amazon.aws.ec2_vpc_nat_gateway:
@@ -54,10 +142,14 @@
         wait: true
         wait_timeout: 300
 
+    - name: Display NAT Gateway deletion status
+      ansible.builtin.debug:
+        msg: "NAT Gateway deletion completed."
 
-    # ---------------------------------------------------------
+
+    # =========================================================
     # DELETE PRIVATE ROUTE TABLE
-    # ---------------------------------------------------------
+    # =========================================================
 
     - name: Delete Private Route Table
       amazon.aws.ec2_vpc_route_table:
@@ -65,10 +157,14 @@
         region: "{{ region }}"
         state: absent
 
+    - name: Display Private Route Table deletion status
+      ansible.builtin.debug:
+        msg: "Private Route Table has been deleted."
 
-    # ---------------------------------------------------------
+
+    # =========================================================
     # DELETE PUBLIC ROUTE TABLE
-    # ---------------------------------------------------------
+    # =========================================================
 
     - name: Delete Public Route Table
       amazon.aws.ec2_vpc_route_table:
@@ -76,10 +172,14 @@
         region: "{{ region }}"
         state: absent
 
+    - name: Display Public Route Table deletion status
+      ansible.builtin.debug:
+        msg: "Public Route Table has been deleted."
 
-    # ---------------------------------------------------------
+
+    # =========================================================
     # DELETE INTERNET GATEWAY
-    # ---------------------------------------------------------
+    # =========================================================
 
     - name: Delete Internet Gateway
       amazon.aws.ec2_vpc_igw:
@@ -87,10 +187,14 @@
         region: "{{ region }}"
         state: absent
 
+    - name: Display Internet Gateway deletion status
+      ansible.builtin.debug:
+        msg: "Internet Gateway has been deleted."
 
-    # ---------------------------------------------------------
-    # DELETE PRIVATE SUBNETS
-    # ---------------------------------------------------------
+
+    # =========================================================
+    # DELETE PRIVATE SUBNET 1
+    # =========================================================
 
     - name: Delete Private Subnet 1
       amazon.aws.ec2_vpc_subnet:
@@ -98,11 +202,21 @@
         region: "{{ region }}"
         state: absent
 
+
+    # =========================================================
+    # DELETE PRIVATE SUBNET 2
+    # =========================================================
+
     - name: Delete Private Subnet 2
       amazon.aws.ec2_vpc_subnet:
         subnet_id: "{{ privsub2id }}"
         region: "{{ region }}"
         state: absent
+
+
+    # =========================================================
+    # DELETE PRIVATE SUBNET 3
+    # =========================================================
 
     - name: Delete Private Subnet 3
       amazon.aws.ec2_vpc_subnet:
@@ -111,9 +225,9 @@
         state: absent
 
 
-    # ---------------------------------------------------------
-    # DELETE PUBLIC SUBNETS
-    # ---------------------------------------------------------
+    # =========================================================
+    # DELETE PUBLIC SUBNET 1
+    # =========================================================
 
     - name: Delete Public Subnet 1
       amazon.aws.ec2_vpc_subnet:
@@ -121,11 +235,21 @@
         region: "{{ region }}"
         state: absent
 
+
+    # =========================================================
+    # DELETE PUBLIC SUBNET 2
+    # =========================================================
+
     - name: Delete Public Subnet 2
       amazon.aws.ec2_vpc_subnet:
         subnet_id: "{{ pubsub2id }}"
         region: "{{ region }}"
         state: absent
+
+
+    # =========================================================
+    # DELETE PUBLIC SUBNET 3
+    # =========================================================
 
     - name: Delete Public Subnet 3
       amazon.aws.ec2_vpc_subnet:
@@ -134,26 +258,41 @@
         state: absent
 
 
-    # ---------------------------------------------------------
+    # =========================================================
     # DELETE VPC
-    # ---------------------------------------------------------
+    # =========================================================
 
     - name: Delete Vprofile VPC
       amazon.aws.ec2_vpc_net:
         name: "{{ vpc_name }}"
-        cidr_block: "{{ vpcCidr }}"
         region: "{{ region }}"
         state: absent
 
-    # ---------------------------------------------------------
+    - name: Display VPC deletion status
+      ansible.builtin.debug:
+        msg: "Vprofile VPC has been deleted."
+
+
+    # =========================================================
     # REMOVE LOCAL OUTPUT FILE
-    # ---------------------------------------------------------
+    # =========================================================
 
     - name: Remove VPC output variables
       ansible.builtin.file:
         path: vars/output_vars
         state: absent
 
-    - name: Cleanup complete
+
+    # =========================================================
+    # FINAL MESSAGE
+    # =========================================================
+
+    - name: Destruction completed
       ansible.builtin.debug:
-        msg: "Vprofile AWS infrastructure has been destroyed."
+        msg:
+          - "=========================================================="
+          - "VPROFILE AWS INFRASTRUCTURE DESTRUCTION COMPLETED"
+          - "=========================================================="
+          - "VPC and associated resources have been removed."
+          - "Region: {{ region }}"
+          - "=========================================================="
