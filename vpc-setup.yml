@@ -257,7 +257,7 @@
 
     - name: Save VPC output variables
       ansible.builtin.copy:
-        dest: vars/output_vars
+        dest: vars/vpc-output_vars
         mode: "0644"
         content: |
           vpcid: "{{ vpcout.vpc.id }}"

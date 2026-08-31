@@ -16,7 +16,7 @@
 
     - name: Import VPC output variables
       ansible.builtin.include_vars:
-        file: vars/output_vars
+        file: vars/vpc-output_vars
 
 
     # ---------------------------------------------------------
@@ -186,7 +186,7 @@
     # REMOVE OUTPUT VARS FILE
     # ---------------------------------------------------------
 
-    - name: Remove vars/output_vars file
+    - name: Remove vars/vpc-output_vars file
       ansible.builtin.file:
-        path: vars/output_vars
+        path: vars/vpc-output_vars
         state: absent

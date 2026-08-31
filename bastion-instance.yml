@@ -16,7 +16,7 @@
 
     - name: Import VPC output variables
       ansible.builtin.include_vars:
-        file: vars/output_vars
+        file: vars/vpc-output_vars
 
 
     # ---------------------------------------------------------
