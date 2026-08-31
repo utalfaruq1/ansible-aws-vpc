@@ -8,7 +8,7 @@
 
     - name: Import VPC setup variables
       ansible.builtin.include_vars:
-        file: vars/vpc-vpc-output_vars
+        file: vars/vpc-output_vars
 
     - name: Import Vprofile setup variables
       ansible.builtin.include_vars:
