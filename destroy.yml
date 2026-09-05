@@ -18,6 +18,10 @@
       ansible.builtin.include_vars:
         file: vars/vpc-output_vars
 
+    - name: Import Bastion output variables
+      ansible.builtin.include_vars:
+        file: vars/bastion-output_vars
+
 
     # ---------------------------------------------------------
     # TERMINATE BASTION HOST
@@ -183,10 +187,15 @@
 
 
     # ---------------------------------------------------------
-    # REMOVE OUTPUT VARS FILE
+    # REMOVE GENERATED OUTPUT FILES
     # ---------------------------------------------------------
 
     - name: Remove vars/vpc-output_vars file
       ansible.builtin.file:
         path: vars/vpc-output_vars
+        state: absent
+
+    - name: Remove vars/bastion-output_vars file
+      ansible.builtin.file:
+        path: vars/bastion-output_vars
         state: absent

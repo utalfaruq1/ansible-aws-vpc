@@ -1,23 +1,11 @@
----
-# =========================================================
-# VPROFILE AWS INFRASTRUCTURE WITH ALL THE THREE PLAYBOOKS VPC, BASTION AND DESTROY
-# =========================================================
+- name: Import VPC output variables
+  ansible.builtin.include_vars:
+    file: vars/vpc-output_vars
 
-- name: Vprofile VPC
-  import_playbook: vpc-setup.yml
-  tags:
-    - create
-    - vpc
+- name: Import Bastion output variables
+  ansible.builtin.include_vars:
+    file: vars/bastion-output_vars
 
-
-- name: Vprofile Bastion
-  import_playbook: bastion-instance.yml
-  tags:
-    - create
-    - bastion
-
-
-- name: Destroy Vprofile Infrastructure
-  import_playbook: destroy.yml
-  tags:
-    - destroy
+- name: Import Vprofile setup variables
+  ansible.builtin.include_vars:
+    file: vars/vprostacksetup

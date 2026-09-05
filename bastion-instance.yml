@@ -119,3 +119,16 @@
           - "Bastion State: {{ bastionHost_out.instances[0].state.name }}"
           - "Bastion Private IP: {{ bastionHost_out.instances[0].private_ip_address | default('N/A') }}"
           - "Bastion Public IP: {{ bastionHost_out.instances[0].public_ip_address | default('N/A') }}"
+
+
+    # ---------------------------------------------------------
+    # SAVE BASTION OUTPUT VARIABLES (separate file)
+    # ---------------------------------------------------------
+
+    - name: Save Bastion output variables
+      ansible.builtin.copy:
+        dest: vars/bastion-output_vars
+        mode: "0644"
+        content: |
+          BastionSGid: "{{ BastionSG_out.group_id }}"
+          BastionInstanceId: "{{ bastionHost_out.instances[0].instance_id }}"
