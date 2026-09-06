@@ -23,4 +23,5 @@ state: present
 
 # Bastion vars
 bastion_ami: ami-0b6d9d3d33ba97d99
+
 MYIP: 0.0.0.0/0
