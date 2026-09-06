@@ -16,6 +16,10 @@
 
     - name: Import Vprofile setup variables
       ansible.builtin.include_vars:
+        file: vars/bastion-output_vars
+
+    - name: Import Vprofile setup variables
+      ansible.builtin.include_vars:
         file: vars/vprostacksetup
 
     - name: Create Vprofile EC2 key pair
