@@ -10,11 +10,11 @@
       ansible.builtin.include_vars:
         file: vars/vpc_setup
 
-    - name: Import Vprofile setup variables
+    - name: Import VPC output variables
       ansible.builtin.include_vars:
         file: vars/vpc-output_vars
 
-    - name: Import Vprofile setup variables
+    - name: Import Bastion output variables
       ansible.builtin.include_vars:
         file: vars/bastion-output_vars
 
